@@ -1,4 +1,6 @@
 site_name: regexr
+repo_url: https://github.com/pwwang/regexr
+repo_name: pwwang/regexr
 theme:
     name: 'material'
 markdown_extensions:
