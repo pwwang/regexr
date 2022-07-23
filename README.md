@@ -50,6 +50,8 @@ regexr = Regexr(
 )
 ```
 
+Inspired by [rex](https://github.com/r-lib/rex) for R and [Regularity](https://github.com/andrewberls/regularity) for Ruby.
+
 ## Why?
 
 We have `re.X` to compile a regular expression in verbose mode, but sometimes it is still difficult to read/write and error-prone.
