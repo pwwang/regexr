@@ -188,4 +188,3 @@ Regexr("a").compile(re.I).match("A")
 ## TODO
 
 - Support bytes
-- Support inline flags (e.g. `(?i)`)

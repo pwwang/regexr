@@ -2,6 +2,7 @@ import re
 from typing import Tuple
 
 import pytest
+from regexr.string import _flags_to_str
 from regexr import *
 
 
@@ -258,13 +259,17 @@ def test_invalid_capture_name():
 
 def test_flags_error():
     with pytest.raises(ValueError):
-        Flag(re.I, capture=True)
-
-    with pytest.raises(ValueError):
         Flag("b")
 
     with pytest.raises(ValueError):
         Regexr("a", Flag(re.I))
+
+    with pytest.raises(ValueError):
+        Regexr(Capture("a", flags="ai", deflags="si"))
+
+    with pytest.raises(ValueError):
+        # must have flags or deflags
+        InlineFlag("a")
 
 
 def test_compile():
@@ -351,6 +356,36 @@ def test_invalid_id_or_capture_name():
     (Regexr(r"\d"), r"\\d"),
     # flags
     (Regexr(Flag(re.I)), "(?i)"),
+    (Regexr(
+        Capture("a"),
+        "1",
+        Captured(1, deflags=re.I),
+    ), "(a)\n1\n(?-i:\\1)"),
 ])
 def test_pretty(regexr: Regexr, prettied: str) -> None:
     assert regexr.pretty() == prettied
+
+
+@pytest.mark.parametrize("flags,out", [
+    (re.I, "i"),
+    (re.I | re.A, "ai"),
+    ([re.I | re.A, "s"], "ais"),
+])
+def test_flags_to_str(flags, out):
+    assert _flags_to_str(flags) == out
+
+
+def test_inline_flags():
+    rex = Regexr(
+        Capture("a"),
+        "1",
+        Captured(1, deflags=re.I),
+    ).compile(re.I)
+    assert rex.match("a1a")
+    assert rex.match("a1A") is None
+
+    rex = Regexr(
+        Capture("a"),
+        "1",
+        InlineFlag(Captured(1), deflags=re.I),
+    ).compile(re.I)

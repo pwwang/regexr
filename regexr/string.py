@@ -46,33 +46,47 @@ from __future__ import annotations
 
 import re
 from abc import ABC, abstractproperty
-from typing import Union
+from typing import Sequence, Union
 
 SegmentType = Union["Segment", str]
 
 
-def _flags_to_str(flags: int) -> str:
+def _flags_to_str(flags: int | str | Sequence[int | str]) -> str:
     """Convert a set of flags to a string
 
     >>> _flags_to_str(re.IGNORECASE)  # 'i'
     >>> _flags_to_str(re.IGNORECASE | re.MULTILINE)  # 'im'
     """
-    out = []
-    if flags & re.A:
-        out.append("a")
-    if flags & re.I:
-        out.append("i")
-    if flags & re.L:
-        out.append("L")
-    if flags & re.M:
-        out.append("m")
-    if flags & re.S:
-        out.append("s")
-    if flags & re.U:
-        out.append("u")
-    if flags & re.X:
-        out.append("x")
-    return "".join(out)
+    if flags is None:
+        return ""
+
+    if isinstance(flags, Sequence) and not isinstance(flags, str):
+        return "".join(_flags_to_str(flag) for flag in flags)
+
+    if isinstance(flags, int):
+        out = []
+        if flags & re.A:
+            out.append("a")
+        if flags & re.I:
+            out.append("i")
+        if flags & re.L:
+            out.append("L")
+        if flags & re.M:
+            out.append("m")
+        if flags & re.S:
+            out.append("s")
+        if flags & re.U:
+            out.append("u")
+        if flags & re.X:
+            out.append("x")
+        return "".join(out)
+
+    # str
+    if any(c not in "aiLmsux" for c in flags):
+        raise ValueError(
+            f"Invalid flag: {flags}, must be a subset of 'aiLmsux'"
+        )
+    return flags
 
 
 class Segment(ABC):
@@ -92,9 +106,12 @@ class Segment(ABC):
         args: Another segments to be wrapped by this one.
         capture: The name of the capture, False to disable capturing and
             True to capture without name.
+        flags: The flags to be used when compiling this segment.
+        deflags: Remove the flags from `re.compile()` while compiling
+            this segment.
     """
 
-    __slots__ = ("args", "capture",)
+    __slots__ = ("args", "capture", "flags")
 
     NONCAPTURING_WRAPPING = True
 
@@ -102,13 +119,27 @@ class Segment(ABC):
         self,
         *args: SegmentType,
         capture: bool | str = False,
+        flags: int | str | Sequence[int | str] = None,
+        deflags: int | str | Sequence[int | str] = None,
     ) -> None:
         """Constructor"""
         if isinstance(capture, str) and not capture.isidentifier():
             raise ValueError(f"Invalid capture name: {capture}")
 
+        flags = _flags_to_str(flags)
+        deflags = _flags_to_str(deflags)
+        for flag in flags:
+            if flag in deflags:
+                raise ValueError(
+                    f"Flag `{flag}` turned on and off"
+                )
+
+        if deflags:
+            deflags = f"-{deflags}"
+
         self.args = args
         self.capture = capture
+        self.flags = f"{flags}{deflags}"
 
     def _str_raw(self) -> str:
         """Stringify this segment, without capturing/non-capturing brackets
@@ -129,10 +160,8 @@ class Segment(ABC):
         for arg in self.args:
             if isinstance(arg, Segment):
                 out.append(arg.pretty(indent, 0))
-            else:
-                out.append(
-                    str(arg) if isinstance(arg, Segment) else re.escape(arg)
-                )
+            else:  # str
+                out.append(re.escape(arg))
 
         return "\n".join(out)
 
@@ -144,57 +173,46 @@ class Segment(ABC):
             level: The indent level.
         """
         arg = self._pretty_raw(indent)
-
-        if self.capture is True:
-
-            if "\n" not in arg:
-                return f"{indent * level}({arg})"
-
+        if (
+            not self.capture
+            and not self.NONCAPTURING_WRAPPING
+            and not self.flags
+        ):
             return "\n".join(
-                (
-                    f"{indent * level}(",
-                    *(
-                        f"{indent * (level + 1)}{line}"
-                        for line in arg.splitlines()
-                    ),
-                    f"{indent * level})",
-                )
+                f"{indent * level}{line}" for line in arg.splitlines()
             )
+
+        capture_start = (
+            "(" if self.capture is True
+            else f"(?P<{self.capture}>" if self.capture
+            else ""
+        )
+        capture_end = ")" if self.capture else ""
+        flags_start = f"(?{self.flags}:" if self.flags else ""
+        flags_end = ")" if self.flags else ""
 
         if self.capture:
+            start = f"{indent * level}{capture_start}{flags_start}"
+            end = f"{indent * level}{flags_end}{capture_end}"
+        elif self.__class__.NONCAPTURING_WRAPPING and not self.flags:
+            start = f"{indent * level}(?:"
+            end = f"{indent * level})"
+        else:  # self.flags not ""
+            start = f"{indent * level}{flags_start}"
+            end = f"{indent * level}{flags_end}"
 
-            if "\n" not in arg:
-                return f"{indent * level}(?P<{self.capture}>{arg})"
-
-            return "\n".join(
-                (
-                    f"{indent * level}(?P<{self.capture}>",
-                    *(
-                        f"{indent * (level + 1)}{line}"
-                        for line in arg.splitlines()
-                    ),
-                    f"{indent * level})",
-                )
-            )
-
-        if self.__class__.NONCAPTURING_WRAPPING:
-
-            if "\n" not in arg:
-                return f"{indent * level}(?:{arg})"
-
-            return "\n".join(
-                (
-                    f"{indent * level}(?:",
-                    *(
-                        f"{indent * (level + 1)}{line}"
-                        for line in arg.splitlines()
-                    ),
-                    f"{indent * level})",
-                )
-            )
+        if "\n" not in arg:
+            return "".join((start, arg, end))
 
         return "\n".join(
-            f"{indent * level}{line}" for line in arg.splitlines()
+            (
+                f"{start}",
+                *(
+                    f"{indent * (level + 1)}{line}"
+                    for line in arg.splitlines()
+                ),
+                f"{end}",
+            )
         )
 
     def __str__(self) -> str:
@@ -205,11 +223,14 @@ class Segment(ABC):
             The final string representation of this segment.
         """
         arg = self._str_raw()
+        flags_start = f"(?{self.flags}:" if self.flags else ""
+        flags_end = ")" if self.flags else ""
+        arg = f"{flags_start}{arg}{flags_end}"
         if self.capture is True:
             return f"({arg})"
         if self.capture:
             return f"(?P<{self.capture}>{arg})"
-        if self.__class__.NONCAPTURING_WRAPPING:
+        if self.__class__.NONCAPTURING_WRAPPING and not self.flags:
             return f"(?:{arg})"
         return arg
 
@@ -307,8 +328,10 @@ class Quantifier(Segment, ABC):
         *args: SegmentType,
         lazy: bool = False,
         capture: bool = False,
+        flags: int | str | Sequence[int | str] = None,
+        deflags: int | str | Sequence[int | str] = None,
     ) -> None:
-        super().__init__(*args, capture=capture)
+        super().__init__(*args, capture=capture, flags=flags, deflags=deflags)
         self.lazy = lazy
 
     @abstractproperty
@@ -375,8 +398,16 @@ class Repeat(Quantifier):
         n: int = None,
         lazy: bool = False,
         capture: bool = False,
+        flags: int | str | Sequence[int | str] = None,
+        deflags: int | str | Sequence[int | str] = None,
     ) -> None:
-        super().__init__(*args, capture=capture, lazy=lazy)
+        super().__init__(
+            *args,
+            capture=capture,
+            flags=flags,
+            deflags=deflags,
+            lazy=lazy,
+        )
         if m < 0:
             raise ValueError("`m` must be positive for `Repeat`")
         if n is not None and n < m:
@@ -403,8 +434,16 @@ class RepeatExact(Quantifier):
         m: int,
         lazy: bool = False,
         capture: bool = False,
+        flags: int | str | Sequence[int | str] = None,
+        deflags: int | str | Sequence[int | str] = None,
     ) -> None:
-        super().__init__(*args, capture=capture, lazy=lazy)
+        super().__init__(
+            *args,
+            capture=capture,
+            flags=flags,
+            deflags=deflags,
+            lazy=lazy,
+        )
         if m <= 0:
             raise ValueError("`m` must be greater than 0 for `Repeat`")
         self.m = m
@@ -423,6 +462,8 @@ class Lazy(Segment):
         self,
         *args: SegmentType,
         capture: bool = False,
+        flags: int | str | Sequence[int | str] = None,
+        deflags: int | str | Sequence[int | str] = None,
     ) -> None:
         if len(args) != 1:
             raise ValueError("`Lazy` must have exactly one positional argument")
@@ -443,7 +484,7 @@ class Lazy(Segment):
         ):
             raise ValueError("`Lazy` must be applied to a quantifier")
 
-        super().__init__(*args, capture=capture)
+        super().__init__(*args, capture=capture, flags=flags, deflags=deflags)
 
     def _str_raw(self) -> str:
         return f"{super()._str_raw()}?"
@@ -456,33 +497,35 @@ class Flag(Segment):
     """Flag `(?aiLmsux)`"""
     NONCAPTURING_WRAPPING = False
 
-    def __init__(
-        self,
-        *args: str | int,
-        capture: bool = False,
-    ) -> None:
-        if capture:
-            raise ValueError("`Flag` cannot be captured.")
-
-        transformed_args = []
-        for arg in args:
-            if isinstance(arg, str):
-                for c in arg:
-                    if c not in "aiLmsux":
-                        raise ValueError(
-                            f"Invalid flag `{c}`, must be `aiLmsux`"
-                        )
-                    transformed_args.append(c)
-            else:
-                transformed_args.append(_flags_to_str(arg))
-
-        super().__init__(*transformed_args, capture=capture)
+    def __init__(self, *args: str | int) -> None:
+        transformed_args = _flags_to_str(args)
+        super().__init__(transformed_args, capture=False)
 
     def _str_raw(self) -> str:
         return f"(?{super()._str_raw()})"
 
     def _pretty_raw(self, indent: str) -> str:
         return self._str_raw()
+
+
+class InlineFlag(Segment):
+    """Inline flag `(?aiLmsux-imsx:...)`"""
+
+    NONCAPTURING_WRAPPING = False
+
+    def __init__(
+        self,
+        *args: SegmentType,
+        capture: bool | str = False,
+        flags: int | str | Sequence[int | str] = None,
+        deflags: int | str | Sequence[int | str] = None,
+    ) -> None:
+        if flags is None and deflags is None:
+            raise ValueError("`InlineFlag` must have `flags` or `deflags`")
+
+        super().__init__(
+            *args, capture=capture, flags=flags, deflags=deflags,
+        )
 
 
 class Raw(Segment):
@@ -495,10 +538,12 @@ class Raw(Segment):
         *args: SegmentType,
         capture: bool = False,
         entire: bool = False,
+        flags: int | str | Sequence[int | str] = None,
+        deflags: int | str | Sequence[int | str] = None,
     ) -> None:
         if not all(isinstance(arg, str) for arg in args):
             raise ValueError("`Raw` must be applied to strings.")
-        super().__init__(*args, capture=capture)
+        super().__init__(*args, capture=capture, flags=flags, deflags=deflags)
         self.entire = entire
 
     def _str_raw(self) -> str:
@@ -544,11 +589,19 @@ class Capture(Segment):
     def __init__(
         self,
         *args: SegmentType,
-        name: bool | str = True,
+        name: bool | str = None,
+        capture: bool | str = None,
+        flags: int | str | Sequence[int | str] = None,
+        deflags: int | str | Sequence[int | str] = None,
     ) -> None:
         """Constructor"""
-        assert name is not False
-        super().__init__(*args, capture=name)
+        if name is None and capture is None:
+            capture = True
+        elif capture is None:
+            capture = name
+
+        assert capture is not False
+        super().__init__(*args, capture=capture, flags=flags, deflags=deflags)
 
 
 class NonCapture(Segment):
@@ -559,9 +612,11 @@ class NonCapture(Segment):
     def __init__(
         self,
         *args: SegmentType,
+        flags: int | str | Sequence[int | str] = None,
+        deflags: int | str | Sequence[int | str] = None,
     ) -> None:
         """Constructor"""
-        super().__init__(*args, capture=False)
+        super().__init__(*args, capture=False, flags=flags, deflags=deflags)
 
 
 class Concat(Segment):
@@ -582,6 +637,8 @@ class Conditional(Segment):
         yes: SegmentType,
         no: SegmentType = None,
         capture: bool = False,
+        flags: int | str | Sequence[int | str] = None,
+        deflags: int | str | Sequence[int | str] = None,
     ) -> None:
         """Constructor"""
         if isinstance(capture, str) and not capture.isidentifier():
@@ -592,7 +649,7 @@ class Conditional(Segment):
         self.id_or_name = id_or_name
         self.yes = re.escape(yes) if isinstance(yes, str) else yes
         self.no = re.escape(no) if isinstance(no, str) else no
-        self.capture = capture
+        super().__init__(capture=capture, flags=flags, deflags=deflags)
 
     def _str_raw(self) -> str:
         id_or_name = (
@@ -640,6 +697,8 @@ class Captured(Segment):
         self,
         id_or_name: str | int,
         capture: bool = False,
+        flags: int | str | Sequence[int | str] = None,
+        deflags: int | str | Sequence[int | str] = None,
     ) -> None:
         """Constructor"""
         if isinstance(capture, str) and not capture.isidentifier():
@@ -647,8 +706,8 @@ class Captured(Segment):
         if isinstance(id_or_name, str) and not id_or_name.isidentifier():
             raise ValueError(f"Invalid id or name: {id_or_name}")
 
-        self.capture = capture
         self.id_or_name = id_or_name
+        super().__init__(capture=capture, flags=flags, deflags=deflags)
 
     def _str_raw(self) -> str:
         if isinstance(self.id_or_name, str):
