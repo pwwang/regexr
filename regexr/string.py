@@ -51,6 +51,30 @@ from typing import Union
 SegmentType = Union["Segment", str]
 
 
+def _flags_to_str(flags: int) -> str:
+    """Convert a set of flags to a string
+
+    >>> _flags_to_str(re.IGNORECASE)  # 'i'
+    >>> _flags_to_str(re.IGNORECASE | re.MULTILINE)  # 'im'
+    """
+    out = []
+    if flags & re.A:
+        out.append("a")
+    if flags & re.I:
+        out.append("i")
+    if flags & re.L:
+        out.append("L")
+    if flags & re.M:
+        out.append("m")
+    if flags & re.S:
+        out.append("s")
+    if flags & re.U:
+        out.append("u")
+    if flags & re.X:
+        out.append("x")
+    return "".join(out)
+
+
 class Segment(ABC):
     """Segments of a regular expression
 
@@ -428,6 +452,39 @@ class Lazy(Segment):
         return f"{super()._pretty_raw(indent)}?"
 
 
+class Flag(Segment):
+    """Flag `(?aiLmsux)`"""
+    NONCAPTURING_WRAPPING = False
+
+    def __init__(
+        self,
+        *args: str | int,
+        capture: bool = False,
+    ) -> None:
+        if capture:
+            raise ValueError("`Flag` cannot be captured.")
+
+        transformed_args = []
+        for arg in args:
+            if isinstance(arg, str):
+                for c in arg:
+                    if c not in "aiLmsux":
+                        raise ValueError(
+                            f"Invalid flag `{c}`, must be `aiLmsux`"
+                        )
+                    transformed_args.append(c)
+            else:
+                transformed_args.append(_flags_to_str(arg))
+
+        super().__init__(*transformed_args, capture=capture)
+
+    def _str_raw(self) -> str:
+        return f"(?{super()._str_raw()})"
+
+    def _pretty_raw(self, indent: str) -> str:
+        return self._str_raw()
+
+
 class Raw(Segment):
     """Raw strings without escaping"""
     __slots__ = ("entire",)
@@ -658,6 +715,12 @@ class Regexr(str):
     __slots__ = ("_segments",)
 
     def __new__(cls, *segments: SegmentType) -> Regexr:
+        if (
+            any(isinstance(part, Flag) for part in segments)
+            and not isinstance(segments[0], Flag)
+        ):
+            raise ValueError("Flags must be the first segment.")
+
         regexr = str.__new__(
             cls,
             "".join(

@@ -15,6 +15,7 @@ from .string import (
     Repeat,
     RepeatExact,
     Lazy,
+    Flag,
     Raw,
     Or,
     Capture,

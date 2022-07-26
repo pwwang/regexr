@@ -213,6 +213,14 @@ from regexr import *
             Regexr(NonCapture("abc")),
             r"(?:abc)",
         ),
+        (
+            Regexr(Flag(re.A, re.I, re.L, re.M, re.S, re.U, re.X)),
+            r"(?aiLmsux)",
+        ),
+        (
+            Regexr(Flag("ai")),
+            r"(?ai)",
+        ),
     ],
 )
 def test_regexr(regexr: Regexr, string: str) -> None:
@@ -246,6 +254,17 @@ def test_raw_not_on_strings():
 def test_invalid_capture_name():
     with pytest.raises(ValueError):
         Maybe("a", capture="a.b")
+
+
+def test_flags_error():
+    with pytest.raises(ValueError):
+        Flag(re.I, capture=True)
+
+    with pytest.raises(ValueError):
+        Flag("b")
+
+    with pytest.raises(ValueError):
+        Regexr("a", Flag(re.I))
 
 
 def test_compile():
@@ -330,6 +349,8 @@ def test_invalid_id_or_capture_name():
     # raw
     (Regexr(Raw(r"\d")), r"\d"),
     (Regexr(r"\d"), r"\\d"),
+    # flags
+    (Regexr(Flag(re.I)), "(?i)"),
 ])
 def test_pretty(regexr: Regexr, prettied: str) -> None:
     assert regexr.pretty() == prettied
