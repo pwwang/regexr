@@ -91,7 +91,7 @@ We have `re.X` to compile a regular expression in verbose mode, but sometimes it
         # match the first part
         Maybe(Capture('(', name="open_paren")),
         RepeatExact(DIGIT, m=3),
-        Conditional("open_paren", yes=r"\)"),
+        Conditional("open_paren", yes=")"),
 
         Maybe(OneOfChars('- ')),
 

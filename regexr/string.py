@@ -533,8 +533,8 @@ class Conditional(Segment):
             raise ValueError(f"Invalid id or name: {id_or_name}")
 
         self.id_or_name = id_or_name
-        self.yes = yes
-        self.no = no
+        self.yes = re.escape(yes) if isinstance(yes, str) else yes
+        self.no = re.escape(no) if isinstance(no, str) else no
         self.capture = capture
 
     def _str_raw(self) -> str:

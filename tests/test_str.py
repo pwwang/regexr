@@ -59,7 +59,7 @@ from regexr import *
                 START,
                 Maybe(Capture("(")),
                 OneOrMore(NoneOfChars("()"), capture=True),
-                Conditional(1, yes=r"\)"),
+                Conditional(1, yes=")"),
                 END,
             ),
             r"^(\()?([^()]+)(?(1)\))$",
